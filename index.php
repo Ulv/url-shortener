@@ -1,62 +1,58 @@
 <?php
+ob_start();
 
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    errorResponse('Method "' . $_SERVER['REQUEST_METHOD'] . '" not allowed. Use POST', 400);
-}
+const REDIS_HOST = '172.16.238.14';
+const REDIS_PORT = 6379;
 
-if ($_SERVER['HTTP_CONTENT_TYPE'] !== 'application/json') {
-    errorResponse('Invalid "Content-Type" header: ' . $_SERVER['HTTP_CONTENT_TYPE'] . '. Use "application/json"', 415);
-}
-
-if ($_SERVER['HTTP_ACCEPT'] !== 'text/plain') {
-    errorResponse('Invalid "Accept" header: ' . $_SERVER['HTTP_ACCEPT'] . '. Use "text/plain"', 415);
-}
+($_SERVER['REQUEST_METHOD'] ?? []) === 'POST' || err('Method "' . $_SERVER['REQUEST_METHOD'] . '" not allowed. Use POST', 400);
+($_SERVER['HTTP_CONTENT_TYPE'] ?? []) === 'application/json' || err('Invalid "Content-Type" header: ' . $_SERVER['HTTP_CONTENT_TYPE'] . '. Use "application/json"', 415);
+($_SERVER['HTTP_ACCEPT'] ?? []) === 'text/plain' || err('Invalid "Accept" header: ' . $_SERVER['HTTP_ACCEPT'] . '. Use "text/plain"', 415);
 
 $requestBody = json_decode(file_get_contents('php://input'), true) ?? [];
-if (!array_key_exists('url', $requestBody) || empty($requestBody['url'])) {
-    errorResponse('"url" param must be not empty. Error: ' . json_last_error_msg(), 400);
+if (!isset($requestBody['url']) || !$requestBody['url']) {
+    err('"url" param must be not empty. Error: ' . json_last_error_msg(), 400);
 }
 
 if (!($url = filter_var($requestBody['url'], FILTER_VALIDATE_URL))) {
-    errorResponse('Invalid url in param!');
+    err('Invalid url in request body!');
 }
 
 $redis = new \Redis();
-$redis->pconnect('172.16.238.14', 6379);
+$redis->pconnect(REDIS_HOST, REDIS_PORT);
 
 $urlHash = sha1($url);
-if ($resultUrl = $redis->hGet('url:hash', $urlHash)) {
-    successResponse(buildUrl($resultUrl));
+if ($resultUrl = $redis->hGet('u:h', $urlHash)) {
+    ok(url($resultUrl));
     exit;
 }
 
-$encodedId = encode($redis->incr('url:counter'));
-$redis->hSet('url:dict', $urlHash, $url);
-$redis->hSet('url:hash', $urlHash, $encodedId);
+$encodedId = encode($redis->incr('u:c')); // counter
+$redis->hSet('u:d', $urlHash, $url); // dictionary
+$redis->hSet('u:h', $urlHash, $encodedId); // hash
 
-successResponse(buildUrl($encodedId));
+ok(url($encodedId));
 
 function encode($id)
 {
     return base_convert($id, 10, 36);
 }
 
-function buildUrl($id)
+function url($id)
 {
     return sprintf('%s://%s/%s', $_SERVER['REQUEST_SCHEME'], $_SERVER['HTTP_HOST'], $id);
 }
 
-function errorResponse(string $error, int $httpCode = 500)
+function err(string $error, int $httpCode = 500)
 {
+    ob_end_flush();
     http_response_code($httpCode);
-    echo $error;
-    exit;
+    die($error);
 }
 
-function successResponse(string $msg = null)
+function ok(string $msg = null)
 {
+    ob_end_flush();
+    http_response_code(200);
     header('Content-type: text/plain');
-    $msg = $msg ?? 'OK';
-    echo $msg;
-    exit;
+    die($msg ?? 'OK');
 }
