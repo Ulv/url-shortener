@@ -1,11 +1,63 @@
 <?php
+/**
+ * URL shorten script
+ *
+ * 1. POST url to shorten. Request constraints:
+ * - HTTP method: POST
+ * - Header: "Content-Type: application/json"
+ * - Header: "Accept: text/plain"
+ * - Request body (JSON): {"url": "<url to shorten>"}
+ *
+ * Response headers:
+ * - 200: Shortened URL
+ * - 400: Invalid request method/body
+ * - 415: Invalid headers
+ * - 500: Error connecting to redis
+ *
+ * 2. GET short url to redirect to the original unshortened url. Constraints:
+ * - HTTP method: GET
+ *
+ * Response headers:
+ * - 302: Redirect to original URL
+ * - 400: URL not found
+ *
+ * Usage example:
+ * 1. Shorten URL:
+ * ```
+ * curl 'http://apphost.tld' --header 'Content-Type: application/json' --header 'Accept: text/plain' --data-raw '{"url":"https://google.com"}'
+ * ```
+ *
+ * Response:
+ * ```
+ * HTTP/1.1 200 OK
+ *
+ * http://apphost.tld/1a3
+ * ```
+ *
+ * 2. Redirect to original url:
+ * ```
+ * curl -vL 'http://pet.loc/1a3'
+ * ```
+ *
+ * Response:
+ *
+ * ```
+ * HTTP/1.1 302 Found
+ *
+ * Location: https://google.com
+ * ```
+ */
 ob_start();
 
-const REDIS_HOST = '172.16.238.14';
+const REDIS_HOST = '172.16.238.142';
 const REDIS_PORT = 6379;
 
-$redis = new \Redis();
-$redis->pconnect(REDIS_HOST, REDIS_PORT);
+try {
+    $redis = new \Redis();
+    $redis->pconnect(REDIS_HOST, REDIS_PORT, 0.5);
+} catch (RedisException $e) {
+    err('Can\'t connect to redis!', 500);
+}
 
 $shortenedUri = trim($_SERVER['REQUEST_URI'] ?? '/', '/');
 if ($shortenedUri) {
@@ -14,7 +66,7 @@ if ($shortenedUri) {
 
     if ($url = $redis->hGet('u:d', $shortenedUri)) {
         ob_end_flush();
-        header('Location: '.$url);
+        header('Location: ' . $url);
         exit;
     }
 
@@ -31,7 +83,7 @@ if ($shortenedUri) {
     }
 
     if (!($url = filter_var($requestBody['url'], FILTER_VALIDATE_URL))) {
-        err('Invalid url in request body!');
+        err('Invalid url in request body!', 400);
     }
 
     $url = htmlentities($url, ENT_QUOTES, 'UTF-8');
